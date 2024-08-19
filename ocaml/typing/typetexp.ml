@@ -287,7 +287,7 @@ end = struct
 
   let mk_poly_univars_tuple_without_jkind var =
     let name = var.txt in
-    let original_jkind = Jkind.Primitive.value ~why:Univar in
+    let original_jkind = new_jkind' ~is_named:true Sort in
     let jkind_info = { of_annot = None } in
     name, mk_pending_univar name original_jkind jkind_info
 
@@ -322,9 +322,9 @@ end = struct
       in
       begin match get_desc v, jkind_info.of_annot with
       (* Must agree exactly with annotation, if one exists *)
-      (* FIXME jbachurski: Should we check that if no annotation is present, 
+      (* FIXME jbachurski: Should we check that if no annotation is present,
          the inferred jkind (in covariant positions) is representable? *)
-      | Tvar { jkind }, Some (declared_jkind, _) 
+      | Tvar { jkind }, Some (declared_jkind, _)
           when not (Jkind.equate jkind declared_jkind) ->
         let reason =
           Bad_univar_jkind { name; declared_jkind; inferred_jkind = jkind }
@@ -333,6 +333,7 @@ end = struct
       | Tvar _, _ when get_level v <> Btype.generic_level ->
           cant_quantify Scope_escape
       | Tvar { name; jkind }, _ ->
+         (* Jkind.default_to_value jkind; *)
          set_type_desc v (Tunivar { name; jkind })
       | Tunivar _, _ ->
          cant_quantify Univar
