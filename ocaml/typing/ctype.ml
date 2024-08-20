@@ -2126,6 +2126,9 @@ let rec estimate_type_jkind env ty =
   | Tpoly (ty, _) -> estimate_type_jkind env ty
   | Tpackage _ -> Jkind (Builtin.value ~why:First_class_module)
 
+let is_principal ty =
+  not !Clflags.principal || get_level ty = generic_level
+
 (**** checking jkind relationships ****)
 
 type type_jkind_sub_result =
@@ -2272,6 +2275,11 @@ let type_jkind_purely env ty =
   else
     type_jkind env ty
 
+let type_jkind_purely_if_principal env ty =
+  match is_principal ty with
+  | true -> Some (type_jkind_purely env ty)
+  | false -> None
+
 let type_sort ~why env ty =
   let jkind, sort = Jkind.of_new_sort_var ~why in
   match constrain_type_jkind env ty jkind with
@@ -2310,16 +2318,20 @@ let unification_jkind_check env ty jkind =
   | Delay_checks r -> r := (ty,jkind) :: !r
   | Skip_checks -> ()
 
-let check_and_update_generalized_ty_jkind ?name ~loc ty =
+let check_and_update_generalized_ty_jkind ?name ~loc env ty =
   let immediacy_check jkind =
+    let externality =
+      Jkind.get_externality_upper_bound
+        ~jkind_of_type:(type_jkind_purely_if_principal env) jkind
+    in
     let is_immediate jkind =
       (* Just check externality and layout, because that's what actually matters
          for upstream code. We check both for a known value and something that
          might turn out later to be value. This is the conservative choice. *)
-      Jkind.(Externality.le (get_externality_upper_bound jkind) External64 &&
-             match get_layout jkind with
+      Jkind.Externality.le externality External64 &&
+             match Jkind.get_layout jkind with
                | Some (Sort Value) | None -> true
-               | _ -> false)
+               | _ -> false
     in
     if Language_extension.erasable_extensions_only ()
       && is_immediate jkind && not (Jkind.History.has_warned jkind)
@@ -2358,9 +2370,6 @@ let check_and_update_generalized_ty_jkind ?name ~loc ty =
   in
   inner ty;
   unmark_type ty
-
-let is_principal ty =
-  not !Clflags.principal || get_level ty = generic_level
 
 (* Recursively expand the head of a type.
    Also expand #-types.
@@ -5632,7 +5641,9 @@ let mode_cross_left env ty mode =
      the types here aren't principal. In any case, leaving the check out
      now; will return and figure this out later. *)
   let jkind = type_jkind_purely env ty in
-  let upper_bounds = Jkind.get_modal_upper_bounds jkind in
+  let upper_bounds =
+    Jkind.get_modal_upper_bounds ~jkind_of_type:(type_jkind_purely_if_principal env) jkind
+  in
   Alloc.meet_const upper_bounds mode
 
 (* CR layouts v2.8: merge with Typecore.expect_mode_cross when [Value]
@@ -5641,7 +5652,9 @@ let mode_cross_right env ty mode =
   (* CR layouts v2.8: This should probably check for principality. See
      similar comment in [mode_cross_left]. *)
   let jkind = type_jkind_purely env ty in
-  let upper_bounds = Jkind.get_modal_upper_bounds jkind in
+  let upper_bounds =
+    Jkind.get_modal_upper_bounds ~jkind_of_type:(type_jkind_purely_if_principal env) jkind
+  in
   Alloc.imply upper_bounds mode
 
 let rec build_subtype env (visited : transient_expr list)
